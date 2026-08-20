@@ -1,99 +1,156 @@
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, HfApi
 import json
 import os
 from datetime import datetime
 
 
 BASE_DIR = "models"
+INVENTORY_FILE = "inventory.json"
 
 
-def select_folder(repo_id):
+def get_model_location(repo_id):
+    """
+    Hugging Face format:
+    
+    organization/model_name
 
-    name = repo_id.split("/")[1].lower()
+    Example:
+    deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+
+    Result:
+    models/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+    """
+
+    parts = repo_id.split("/", 1)
+
+    if len(parts) != 2:
+        raise ValueError(
+            "Invalid Hugging Face repo format. "
+            "Expected: organization/model_name"
+        )
+
+    organization = parts[0]
+    model_name = parts[1]
+
+    path = os.path.join(
+        BASE_DIR,
+        organization,
+        model_name
+    )
+
+    return organization, model_name, path
 
 
-    if "qwen" in name:
-        return "Qwen"
 
-    elif "deepseek" in name:
-        return "DeepSeek"
+def get_model_metadata(repo_id):
 
-    elif "llama" in name:
-        return "Llama"
+    api = HfApi()
 
-    elif "gemma" in name:
-        return "Google"
+    try:
+        info = api.model_info(repo_id)
 
-    elif "mistral" in name:
-        return "Mistral"
+        license_name = "Unknown"
+
+        if info.cardData:
+            license_name = info.cardData.get(
+                "license",
+                "Unknown"
+            )
+
+        return {
+            "author": info.author,
+            "license": license_name,
+            "downloads": info.downloads
+        }
+
+    except Exception:
+
+        return {
+            "author": "Unknown",
+            "license": "Unknown",
+            "downloads": 0
+        }
+
+
+
+def update_inventory(record):
+
+    if os.path.exists(INVENTORY_FILE):
+
+        with open(
+            INVENTORY_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            inventory = json.load(f)
 
     else:
-        return "Other"
+
+        inventory = []
 
 
-
-def update_inventory(data):
-
-    file = "inventory.json"
+    inventory.append(record)
 
 
-    if os.path.exists(file):
-
-        with open(file,"r") as f:
-            inventory=json.load(f)
-
-    else:
-        inventory=[]
-
-
-    inventory.append(data)
-
-
-    with open(file,"w") as f:
+    with open(
+        INVENTORY_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
 
         json.dump(
             inventory,
             f,
-            indent=4
+            indent=4,
+            ensure_ascii=False
         )
-
 
 
 
 def download_model(repo_id):
 
-
-    family = select_folder(repo_id)
-
-
-    model_name = repo_id.split("/")[1]
-
-
-    path = os.path.join(
-        BASE_DIR,
-        family,
-        model_name
+    organization, model_name, path = get_model_location(
+        repo_id
     )
 
 
-    print("\nDownloading:")
+    print("\n================================")
+    print("MODEL DOWNLOAD")
+    print("================================")
+
+    print(f"\nRepository:")
     print(repo_id)
 
-    print("\nSaving to:")
+    print(f"\nOrganization:")
+    print(organization)
+
+    print(f"\nModel:")
+    print(model_name)
+
+    print(f"\nSaving location:")
     print(path)
 
 
-
-    confirm=input(
-        "\nContinue? (yes/no): "
+    confirm = input(
+        "\nContinue download? (yes/no): "
     )
 
 
     if confirm.lower() != "yes":
 
-        print("Cancelled")
+        print("\nCancelled.")
         return
 
+
+
+    os.makedirs(
+        path,
+        exist_ok=True
+    )
+
+
+    print("\nDownloading...\n")
 
 
     snapshot_download(
@@ -105,39 +162,59 @@ def download_model(repo_id):
     )
 
 
-    record={
+    metadata = get_model_metadata(
+        repo_id
+    )
 
-        "model": repo_id,
+
+    record = {
+
+        "repo_id": repo_id,
+
+        "organization": organization,
+
+        "model_name": model_name,
 
         "location": path,
+
+        "author": metadata["author"],
+
+        "license": metadata["license"],
+
+        "huggingface_downloads":
+            metadata["downloads"],
 
         "download_date":
             str(datetime.now()),
 
         "status":
             "completed"
-
     }
 
 
-    update_inventory(record)
+    update_inventory(
+        record
+    )
 
 
-    print("\nDownload completed")
+    print("\n================================")
+    print("Download Completed")
+    print("================================")
 
 
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
 
     import sys
 
 
-    if len(sys.argv)<2:
+    if len(sys.argv) < 2:
 
         print(
-        "Usage:\n"
-        "python downloader.py organization/model"
+            "\nUsage:"
+            "\npython downloader.py organization/model_name"
+            "\n\nExample:"
+            "\npython downloader.py deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
         )
 
     else:
